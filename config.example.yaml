@@ -1,0 +1,48 @@
+# Copy to config.yaml and edit. Secrets (the Starling token, alert webhook)
+# go in .env, NOT here - config.yaml is safe to keep around unencrypted,
+# but it's still gitignored by default since it's personal.
+
+# One or more names as they appear as the counterparty on an incoming
+# Starling feed item - e.g. how your employer's payroll/expenses account
+# shows up in the Starling app. Matching is case-insensitive; an item
+# matches if any name here equals, or appears as a substring of, the
+# counterparty name.
+employer_names:
+  - "ACME CORP LTD"
+
+# Must exactly match the name of an existing saved payee in your Starling
+# account (Payees screen in the app) that represents your credit card.
+# The engine only pays existing payees - it cannot create one via the API.
+credit_card_payee_name: "My Credit Card"
+
+# Leave commented out if your personal access token only has access to a
+# single account. Set explicitly if it can see more than one - the engine
+# refuses to guess which account to watch/pay from.
+# account_uid: "00000000-0000-0000-0000-000000000000"
+
+currency: "GBP"
+
+safety:
+  # Refuse to transfer any single matched payment larger than this.
+  # Amounts are in minor units (pence) - e.g. 50000 = GBP 500.00.
+  max_transfer_minor_units: 50000
+  # Refuse to transfer if today's total transferred would exceed this,
+  # even across several smaller matched payments.
+  max_daily_total_minor_units: 100000
+
+# THE MOST IMPORTANT SETTING. While true, the engine logs/alerts what it
+# WOULD do but never calls the Starling payments API - nothing moves.
+# Only set to false after you've watched it run correctly in dry-run mode
+# for a while, and ideally tested once against Starling's sandbox
+# environment (set sandbox: true + a sandbox token first).
+dry_run: true
+
+# Use Starling's sandbox environment/token instead of production.
+sandbox: false
+
+# How far back to look on the very first run (before state.json exists).
+# Every run after that only looks back to the previous run's timestamp,
+# so this only matters once.
+poll_lookback_minutes: 1440
+
+state_path: "state.json"
