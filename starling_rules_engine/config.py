@@ -36,6 +36,9 @@ class Config:
     state_path: Path
     starling_token: str
     alert_webhook_url: Optional[str]
+    signing_key_uid: Optional[str]
+    signing_private_key_path: Optional[Path]
+    reconciliation_match_window_days: int
 
 
 def load_config(config_path: Path) -> Config:
@@ -68,6 +71,14 @@ def load_config(config_path: Path) -> Config:
     except (KeyError, TypeError, ValueError) as exc:
         raise ConfigError(f"invalid safety config: {exc}") from exc
 
+    reconciliation_raw = raw.get("reconciliation") or {}
+    try:
+        reconciliation_match_window_days = int(reconciliation_raw.get("match_window_days", 14))
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"invalid reconciliation.match_window_days: {exc}") from exc
+    if reconciliation_match_window_days < 0:
+        raise ConfigError("reconciliation.match_window_days must be >= 0")
+
     return Config(
         employer_names=employer_names,
         credit_card_payee_name=require("credit_card_payee_name"),
@@ -80,4 +91,9 @@ def load_config(config_path: Path) -> Config:
         state_path=Path(raw.get("state_path", "state.json")),
         starling_token=token,
         alert_webhook_url=os.environ.get("STARLING_RULES_ALERT_WEBHOOK_URL") or None,
+        signing_key_uid=raw.get("signing_key_uid") or None,
+        signing_private_key_path=(
+            Path(raw["signing_private_key_path"]) if raw.get("signing_private_key_path") else None
+        ),
+        reconciliation_match_window_days=reconciliation_match_window_days,
     )

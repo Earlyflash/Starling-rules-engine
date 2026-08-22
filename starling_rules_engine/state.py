@@ -34,8 +34,15 @@ class State:
     def _load(self) -> dict:
         if self._path.exists():
             with open(self._path, "r", encoding="utf-8") as fh:
-                return json.load(fh)
-        return {"last_poll_at": None, "processed": {}}
+                data = json.load(fh)
+        else:
+            data = {}
+        # setdefault rather than a fixed literal so state.json files written
+        # before a given key existed (e.g. claimed_outbound) still load fine.
+        data.setdefault("last_poll_at", None)
+        data.setdefault("processed", {})
+        data.setdefault("claimed_outbound", {})
+        return data
 
     def save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
@@ -74,3 +81,18 @@ class State:
             if rec["outcome"] == "transferred" and rec["processed_at"].startswith(today):
                 total += rec["amount_minor_units"]
         return total
+
+    def claimed_outbound_uids(self) -> frozenset[str]:
+        """feed_item_uids of outbound payments already matched against some
+        inbound reimbursement - see reconciler.match_payments."""
+        return frozenset(self._data["claimed_outbound"].keys())
+
+    def claim_outbound(self, outbound_feed_item_uid: str, inbound_feed_item_uid: str, claimed_at: str) -> None:
+        """Record that an outbound payment has been matched to an inbound
+        reimbursement, so it's never matched against a *different* inbound
+        item later (e.g. two reimbursements of the same amount, one manual
+        payment)."""
+        self._data["claimed_outbound"][outbound_feed_item_uid] = {
+            "matched_inbound_feed_item_uid": inbound_feed_item_uid,
+            "claimed_at": claimed_at,
+        }

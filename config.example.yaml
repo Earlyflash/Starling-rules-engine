@@ -30,12 +30,38 @@ safety:
   # even across several smaller matched payments.
   max_daily_total_minor_units: 100000
 
+reconciliation:
+  # Before auto-paying a matched reimbursement, the engine checks whether
+  # you've already paid the card off yourself for that amount within this
+  # many days either side - if so, it skips the auto-payment instead of
+  # duplicating it. Also used by `python -m starling_rules_engine.reconcile`
+  # (a separate, read-only report - see README.md). Set to 0 to disable the
+  # check entirely.
+  match_window_days: 14
+
 # THE MOST IMPORTANT SETTING. While true, the engine logs/alerts what it
 # WOULD do but never calls the Starling payments API - nothing moves.
 # Only set to false after you've watched it run correctly in dry-run mode
 # for a while, and ideally tested once against Starling's sandbox
 # environment (set sandbox: true + a sandbox token first).
 dry_run: true
+
+# Required to make real payments (i.e. once dry_run is false) - not needed
+# while dry_run stays true. Starling requires every payment-creation
+# request to be signed with an RSA key registered against your personal
+# access token, in addition to the token itself:
+#   1. Generate a key pair, e.g.:
+#        openssl genrsa -out starling-signing-private.pem 2048
+#        openssl rsa -in starling-signing-private.pem -pubout -out starling-signing-public.pem
+#   2. Upload starling-signing-public.pem in the Developer Portal against
+#      your personal access token - it gives you back a key uid, which
+#      goes below.
+#   3. Point signing_private_key_path at the *private* key file. Keep it
+#      outside this repo (or gitignored) - it's as sensitive as the
+#      access token in .env. If the key is passphrase-protected, set
+#      STARLING_SIGNING_KEY_PASSPHRASE in .env.
+# signing_key_uid: "00000000-0000-0000-0000-000000000000"
+# signing_private_key_path: "/path/outside/this/repo/starling-signing-private.pem"
 
 # Use Starling's sandbox environment/token instead of production.
 sandbox: false

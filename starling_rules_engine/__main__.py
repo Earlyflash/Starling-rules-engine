@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from .config import ConfigError, load_config
 from .engine import run_once
 from .notifier import Notifier
+from .signing import SigningError, load_signing_key
 from .starling_client import StarlingClient
 from .state import State
 
@@ -47,10 +48,25 @@ def main(argv=None) -> int:
         print(f"config error: {exc}", file=sys.stderr)
         return 2
 
+    signing_key = None
     if config.dry_run:
         log.warning("dry_run is enabled: no real payments will be made")
+    else:
+        if not config.signing_key_uid or not config.signing_private_key_path:
+            print(
+                "config error: dry_run is false, but signing_key_uid / signing_private_key_path "
+                "are not set - both are required to make real payments (see README.md 'Before "
+                "you enable real transfers')",
+                file=sys.stderr,
+            )
+            return 2
+        try:
+            signing_key = load_signing_key(config.signing_key_uid, config.signing_private_key_path)
+        except SigningError as exc:
+            print(f"config error: {exc}", file=sys.stderr)
+            return 2
 
-    client = StarlingClient(config.starling_token, sandbox=config.sandbox)
+    client = StarlingClient(config.starling_token, sandbox=config.sandbox, signing_key=signing_key)
     state = State(config.state_path)
     notifier = Notifier(config.alert_webhook_url)
 

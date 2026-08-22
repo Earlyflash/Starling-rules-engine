@@ -47,6 +47,9 @@ class TestLoadConfig(unittest.TestCase):
         self.assertFalse(config.sandbox)
         self.assertIsNone(config.account_uid)
         self.assertIsNone(config.alert_webhook_url)
+        self.assertIsNone(config.signing_key_uid)
+        self.assertIsNone(config.signing_private_key_path)
+        self.assertEqual(config.reconciliation_match_window_days, 14)  # defaults to safe/sane
 
     @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok"}, clear=True)
     def test_missing_employer_names_raises(self):
@@ -84,6 +87,31 @@ safety:
         self._write(VALID_YAML)
         config = load_config(self.config_path)
         self.assertEqual(config.alert_webhook_url, "https://example.invalid/hook")
+
+    @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok"}, clear=True)
+    def test_reads_optional_signing_config(self):
+        self._write(
+            VALID_YAML
+            + """
+signing_key_uid: "11111111-1111-1111-1111-111111111111"
+signing_private_key_path: "/path/to/key.pem"
+"""
+        )
+        config = load_config(self.config_path)
+        self.assertEqual(config.signing_key_uid, "11111111-1111-1111-1111-111111111111")
+        self.assertEqual(config.signing_private_key_path, Path("/path/to/key.pem"))
+
+    @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok"}, clear=True)
+    def test_reads_custom_reconciliation_window(self):
+        self._write(VALID_YAML + "\nreconciliation:\n  match_window_days: 7\n")
+        config = load_config(self.config_path)
+        self.assertEqual(config.reconciliation_match_window_days, 7)
+
+    @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok"}, clear=True)
+    def test_negative_reconciliation_window_raises(self):
+        self._write(VALID_YAML + "\nreconciliation:\n  match_window_days: -1\n")
+        with self.assertRaises(ConfigError):
+            load_config(self.config_path)
 
 
 if __name__ == "__main__":

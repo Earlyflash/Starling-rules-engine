@@ -3,6 +3,8 @@ __pycache__/
 .env
 config.yaml
 state.json
+*.pem
+*.key
 .venv/
 venv/
 *.egg-info/

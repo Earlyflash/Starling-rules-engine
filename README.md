@@ -14,17 +14,23 @@ transfers" below before setting `dry_run: false`.**
    last run (or the last `poll_lookback_minutes` on the very first run).
 2. Any settled, inbound item whose counterparty name matches one of your
    configured `employer_names` is treated as a match.
-3. Each match is checked against your configured safety caps
+3. Before doing anything else with a match, it checks whether you've
+   already paid the card off yourself for that amount within
+   `reconciliation.match_window_days` days either side (see
+   "Reconciliation and duplicate protection" below) - if so, it's skipped
+   as already settled, never paid twice.
+4. Otherwise, the match is checked against your configured safety caps
    (`max_transfer_minor_units`, `max_daily_total_minor_units`). A match
    that would breach either cap is **skipped and alerted on**, never
    partially transferred.
-4. If it passes the caps and `dry_run: false`, it makes a one-off payment
+5. If it passes the caps and `dry_run: false`, it makes a one-off payment
    of the same amount to your configured `credit_card_payee_name` (which
    must already exist as a saved payee in your Starling account).
-5. Every outcome - transferred, skipped (cap), skipped (dry run), or
-   error - is logged and, if `STARLING_RULES_ALERT_WEBHOOK_URL` is set,
-   posted to that webhook (e.g. a Slack incoming webhook).
-6. Each feed item is only ever processed once, tracked in `state.json` -
+6. Every outcome - transferred, skipped (already paid), skipped (cap),
+   skipped (dry run), or error - is logged and, if
+   `STARLING_RULES_ALERT_WEBHOOK_URL` is set, posted to that webhook (e.g.
+   a Slack incoming webhook).
+7. Each feed item is only ever processed once, tracked in `state.json` -
    safe to re-run without double-paying.
 
 It's a one-shot script, not a daemon: it's meant to be run on a schedule
@@ -54,32 +60,63 @@ Edit `config.yaml`:
 Edit `.env`:
 - `STARLING_PERSONAL_ACCESS_TOKEN`: create one at
   <https://developer.starlingbank.com> under your account's Personal
-  Access Tokens. It needs read access to accounts/transactions/payees,
-  plus whichever scope covers paying an existing saved payee - the token
-  creation screen lists the available scopes; pick the minimum set that
-  covers reading feed items, payees, and making a payment to an existing
-  payee.
+  Access Tokens. Needs scopes `account:read`, `account-list:read`,
+  `payee:read`, `transaction:read`, and - only if you intend to ever set
+  `dry_run: false` - `pay-local:create`. (Starling's OpenAPI spec also
+  names a `pay-local-once:create` scope on the payment endpoint, but it
+  isn't offered as a selectable scope in the portal, so there's nothing
+  to pick for it - see starling_client.py's module docstring.)
 - `STARLING_RULES_ALERT_WEBHOOK_URL` (optional): a webhook that gets a
   message per transfer/skip/error.
+- `STARLING_SIGNING_KEY_PASSPHRASE` (optional): only needed if you protect
+  the signing private key below with a passphrase.
+
+If you plan to set `dry_run: false`, also set `signing_key_uid` and
+`signing_private_key_path` in `config.yaml` - see the "Before you enable
+real transfers" section below for why and how.
 
 ## Before you enable real transfers
 
-This project was scaffolded without network access to
-`developer.starlingbank.com`, so the exact request/response shape used in
-`starling_rules_engine/starling_client.py` - particularly
-`make_local_payment` - is based on general knowledge of Starling's public
-API, not a docs page checked at the time of writing. **Before setting
-`dry_run: false`:**
+`starling_rules_engine/starling_client.py`'s request/response shapes were
+originally written without network access to
+`developer.starlingbank.com` to check them. That's since been verified
+against Starling's live OpenAPI spec and official sample code (see that
+file's module docstring for exactly what was checked and when) - one real
+bug was found and fixed as part of that: `make_local_payment` now sends
+the correct body shape, and every payment request is signed as Starling
+requires.
 
-1. Read `starling_rules_engine/starling_client.py`'s module docstring and
-   the `make_local_payment` docstring for what to double check.
-2. Cross-check the endpoint, request body, and required token scope
-   against the current docs at <https://developer.starlingbank.com/docs>.
-3. Ideally, set `sandbox: true` in `config.yaml`, use a **sandbox**
-   personal access token, and watch a full run (with `dry_run: false`)
-   move fake money in the sandbox before ever pointing this at your real
-   account.
-4. Run against your real account with `dry_run: true` for a while first
+**Payment requests must be signed.** Beyond the personal access token,
+Starling requires every payment-creation request to carry a detached
+signature from an RSA key you register in the Developer Portal:
+
+1. Generate a key pair:
+   ```
+   openssl genrsa -out starling-signing-private.pem 2048
+   openssl rsa -in starling-signing-private.pem -pubout -out starling-signing-public.pem
+   ```
+2. Upload `starling-signing-public.pem` in the Developer Portal against
+   your personal access token; it gives you back a key uid.
+3. Set `signing_key_uid` (the uid from step 2) and
+   `signing_private_key_path` (pointing at the *private* key from step 1)
+   in `config.yaml`. Keep the private key file outside this repo, or at
+   least somewhere gitignored (`*.pem`/`*.key` already are) - it's as
+   sensitive as the access token.
+
+`dry_run: true` never needs any of this - it never calls the payment
+endpoint. The engine refuses to start with `dry_run: false` if
+`signing_key_uid` / `signing_private_key_path` aren't both set.
+
+**Before setting `dry_run: false` for real:**
+
+1. Read `starling_rules_engine/starling_client.py` and `signing.py`'s
+   module docstrings for exactly what's been verified and against what
+   sources, so you can judge whether anything might have drifted since.
+2. Ideally, set `sandbox: true` in `config.yaml`, use a **sandbox**
+   personal access token and a sandbox-registered signing key, and watch
+   a full run (with `dry_run: false`) move fake money in the sandbox
+   before ever pointing this at your real account.
+3. Run against your real account with `dry_run: true` for a while first
    and check the logs/alerts look right for real incoming payments.
 
 ## Running once
@@ -90,6 +127,40 @@ python -m starling_rules_engine
 
 Add `-v` for verbose logging, or `--config`/`--env-file` to point at
 different files.
+
+## Reconciliation and duplicate protection
+
+If you sometimes pay the credit card off by hand instead of waiting for
+this tool, the engine avoids double-paying: before auto-paying a matched
+reimbursement, it looks for a settled payment you already made to
+`credit_card_payee_name` of the *same amount*, within
+`reconciliation.match_window_days` days either side (default 14 - see
+config.example.yaml). If it finds one, the reimbursement is marked
+`skipped_already_paid` instead of transferred, and that outbound payment
+is recorded in `state.json` so it can't also be matched against a
+*different* reimbursement of the same amount later. Set
+`reconciliation.match_window_days: 0` to turn this off.
+
+This only ever protects against a manual payment made *before* the engine
+would otherwise have auto-paid - it can't see into the future, so a
+manual payment made after the engine already auto-paid is a genuine
+double-payment on your end, not something the engine could have caught.
+
+Separately, `python -m starling_rules_engine.reconcile [--days 30]` is a
+**read-only** report (no `dry_run: false` or signing key needed) that
+pairs every reimbursement against every card payment (auto-paid or
+manual) over a period, and prints what's matched, what reimbursements
+have no card payment to show for them, and what card payments have no
+reimbursement explaining them - useful as a sanity check independent of
+what the live poller has or hasn't caught.
+
+Add `--months N` instead of `--days` for a month-by-month breakdown -
+inbound total, outbound total, how much was matchable, and what's left
+unmatched on each side, per calendar month:
+
+```
+python -m starling_rules_engine.reconcile --months 3
+```
 
 ## Running on a schedule
 
@@ -112,8 +183,16 @@ the real API.
 
 - `starling_rules_engine/starling_client.py` - thin REST wrapper around
   the Starling Personal API (accounts, payees, feed items, payments).
+- `starling_rules_engine/signing.py` - the RSA request-signing Starling
+  requires for payment-creation requests specifically (everything else
+  uses the plain access token).
 - `starling_rules_engine/matcher.py` - decides if a feed item is an
   employer expense payment.
+- `starling_rules_engine/reconciler.py` - matches inbound reimbursements
+  against outbound card payments; shared by the engine's duplicate
+  protection and by `reconcile.py`'s report.
+- `starling_rules_engine/reconcile.py` - the read-only, on-demand
+  reconciliation report (`python -m starling_rules_engine.reconcile`).
 - `starling_rules_engine/safety.py` - the transfer/daily caps; the one
   place a match can be vetoed.
 - `starling_rules_engine/state.py` - local JSON ledger for idempotency and
