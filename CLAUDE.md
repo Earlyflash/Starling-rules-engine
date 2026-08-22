@@ -118,15 +118,11 @@ Starling's `amount.minorUnits` field - see "Working in this repo" below.
   failing loudly (raising) over guessing/defaulting when data looks
   wrong, and never make the safety caps in `safety.py` easier to bypass
   without the user explicitly asking for it.
-- `starling_client.py`'s request/response shapes were originally written
-  without access to live Starling API docs, then verified 2026-08-22
-  against Starling's live OpenAPI spec and official sample code - see
-  that file's module docstring for exactly what was checked and against
-  what sources (`signing.py`, added at the same time, implements the
-  request-signing `make_local_payment` needs and wasn't present in the
-  original scaffold). If you touch either file, re-verify against those
-  sources rather than assuming they're still accurate - don't trust this
-  note indefinitely, APIs drift.
+- `starling_client.py`'s request/response shapes and `signing.py`'s
+  signature scheme are both checked against Starling's API docs/samples -
+  see their module docstrings for sources. If you touch either file,
+  re-verify against those sources rather than assuming the shapes here
+  are still accurate - APIs drift.
 - Tests mock the Starling client entirely (`unittest.mock`) - never make
   a test hit the real API, sandbox or otherwise.
 - `dry_run` must stay the default (`true`) for a fresh `config.example.yaml`

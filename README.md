@@ -77,15 +77,6 @@ real transfers" section below for why and how.
 
 ## Before you enable real transfers
 
-`starling_rules_engine/starling_client.py`'s request/response shapes were
-originally written without network access to
-`developer.starlingbank.com` to check them. That's since been verified
-against Starling's live OpenAPI spec and official sample code (see that
-file's module docstring for exactly what was checked and when) - one real
-bug was found and fixed as part of that: `make_local_payment` now sends
-the correct body shape, and every payment request is signed as Starling
-requires.
-
 **Payment requests must be signed.** Beyond the personal access token,
 Starling requires every payment-creation request to carry a detached
 signature from an RSA key you register in the Developer Portal:
@@ -109,14 +100,11 @@ endpoint. The engine refuses to start with `dry_run: false` if
 
 **Before setting `dry_run: false` for real:**
 
-1. Read `starling_rules_engine/starling_client.py` and `signing.py`'s
-   module docstrings for exactly what's been verified and against what
-   sources, so you can judge whether anything might have drifted since.
-2. Ideally, set `sandbox: true` in `config.yaml`, use a **sandbox**
+1. Ideally, set `sandbox: true` in `config.yaml`, use a **sandbox**
    personal access token and a sandbox-registered signing key, and watch
    a full run (with `dry_run: false`) move fake money in the sandbox
    before ever pointing this at your real account.
-3. Run against your real account with `dry_run: true` for a while first
+2. Run against your real account with `dry_run: true` for a while first
    and check the logs/alerts look right for real incoming payments.
 
 ## Running once

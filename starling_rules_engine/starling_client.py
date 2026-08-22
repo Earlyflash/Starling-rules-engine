@@ -1,41 +1,23 @@
 """Thin wrapper around the Starling Bank Personal Access API (v2).
 
-VERIFIED 2026-08-22 against Starling's live OpenAPI spec
-(https://api.starlingbank.com/api/openapi.json, reached via the redirect
-at https://developer.starlingbank.com/api/openapi.json) - this repo was
-originally scaffolded without access to that host, so treat this note as
-the source of truth over any older comment claiming the shapes below are
-unconfirmed. What was checked and confirmed correct: the URL/path of
-every endpoint below, every response field read into `Account`, `Payee`,
-and `FeedItem`, the feed item `status`/`direction` enum values relied on
-in matcher.py, and the 18-character GBP/FPS reference limit.
+Every endpoint here uses plain `Bearer` auth except `make_local_payment`,
+whose `PUT /payments/local/account/{accountUid}/category/{categoryUid}`
+needs Starling's detached request-signature scheme on top of the token -
+see signing.py's docstring for the mechanics. Its body requires
+`externalIdentifier` (an idempotency key) and `destinationPayeeAccountUid`
+- for a Personal Access Token, the payment recipient can only be an
+existing payee, addressed by its account uid.
 
-One thing was wrong and has since been fixed here: `make_local_payment`'s
-request body and auth. Per the spec, `PUT
-/payments/local/account/{accountUid}/category/{categoryUid}` requires
-`externalIdentifier` (idempotency key, required) and
-`destinationPayeeAccountUid` (not a separate `payeeUid` field - for
-payments made with a Personal Access Token, the recipient can only be an
-existing payee, addressed by its account uid), and its `security` in the
-spec is `BearerAndSignature`, not plain `Bearer` - every other endpoint
-here uses plain `Bearer` (confirmed via the spec's per-path `security`
-blocks), but a payment request additionally needs Starling's detached
-signature scheme, implemented in `signing.py`. See that module's
-docstring for the mechanics and the official sample it was verified
-against. If you touch either this file or signing.py, re-check both
-against Starling's spec/samples rather than assuming they're still
-accurate - APIs drift.
+Starling's OpenAPI spec lists two scopes on that endpoint,
+`pay-local:create` and `pay-local-once:create`, but the token-creation
+scope picker at developer.starlingbank.com only offers `pay-local:create`
+- nothing to do about the second one from the token-creation side. If a
+real payment ever fails with an insufficient-scope error naming
+`pay-local-once:create`, that's the thing to chase down.
 
-One discrepancy the spec doesn't explain: its `security` block for the
-payment endpoint lists two required scopes, `pay-local:create` and
-`pay-local-once:create`, but the real token-creation scope picker at
-developer.starlingbank.com (checked 2026-08-22) only offers
-`pay-local:create` - `pay-local-once:create` isn't a selectable scope, so
-there's nothing to do about it from the token-creation side. If a real
-payment ever fails with an insufficient-scope error naming
-`pay-local-once:create`, that's the thing to chase down; otherwise assume
-it's either bundled automatically for Personal Access Tokens or specific
-to OAuth apps rather than PATs.
+If you touch this file or signing.py, re-check both against Starling's
+API docs/samples rather than assuming the shapes here are still accurate
+- APIs drift.
 """
 
 from __future__ import annotations

@@ -3,16 +3,12 @@ endpoints (`BearerAndSignature` in their OpenAPI spec - a plain `Bearer`
 token is accepted for read-only calls like `/accounts`, `/payees`, and
 feed items, but rejected on `PUT /payments/local/account/.../category/...`).
 
-Verified 2026-08-22 against Starling's live OpenAPI spec
-(https://api.starlingbank.com/api/openapi.json, reached via the redirect
-at https://developer.starlingbank.com/api/openapi.json) and their official
-sample code at
+Implemented per Starling's official sample code at
 https://github.com/starlingbank/api-samples/tree/master/public-api-examples/message-signing
 (see in particular `StarlingApiClient.java` and `SignatureUtils.java`
 there, and `InitiatePersonalAccessPayment.java` for the personal-access-
 token flow this module supports). If payments start failing with a
-signature-related error, re-check this module against that sample first -
-it's the authoritative source this was written from.
+signature-related error, re-check this module against that sample first.
 
 The scheme, end to end:
 1. Generate an RSA key pair and upload the *public* key in the Starling
