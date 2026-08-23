@@ -2,7 +2,9 @@ __pycache__/
 *.pyc
 .env
 config.yaml
+config.yaml.bak
 state.json
+state.json.bak*
 *.pem
 *.key
 .venv/

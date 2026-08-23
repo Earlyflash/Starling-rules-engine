@@ -101,10 +101,11 @@ class TestMatchPayments(unittest.TestCase):
         result = match_payments([inbound_a, inbound_b], [outbound], window_days=14)
 
         self.assertEqual(len(result.matched), 1)
-        # in-a is chronologically first and closer to the outbound date, so
-        # it should be the one that claims the single outbound item.
-        self.assertEqual(result.matched[0].inbound.feed_item_uid, "in-a")
-        self.assertEqual([i.feed_item_uid for i in result.unmatched_inbound], ["in-b"])
+        # in-b is closer to the outbound date (1 day vs 2), so it should
+        # claim the single outbound item even though in-a is chronologically
+        # first - matching must be by closeness, not by processing order.
+        self.assertEqual(result.matched[0].inbound.feed_item_uid, "in-b")
+        self.assertEqual([i.feed_item_uid for i in result.unmatched_inbound], ["in-a"])
 
     def test_picks_closest_date_when_multiple_candidates(self):
         inbound = make_inbound(transaction_time="2026-08-10T09:00:00Z")
@@ -116,6 +117,26 @@ class TestMatchPayments(unittest.TestCase):
         self.assertEqual(len(result.matched), 1)
         self.assertEqual(result.matched[0].outbound.feed_item_uid, "out-close")
         self.assertEqual([o.feed_item_uid for o in result.unmatched_outbound], ["out-far"])
+
+    def test_global_matching_beats_chronological_greed(self):
+        # Reproduces a real case: three same-amount reimbursements land 3,
+        # 9, and 11 Aug. One manual card payment on 10 Aug should match the
+        # 9 Aug one (closest, 1 day) - not the 3 Aug one, even though 3 Aug
+        # is processed "first" and 10 Aug is technically within its window
+        # too (7 days). A second payment on 23 Aug should then go to the
+        # remaining 11 Aug item (12 days - still the closest thing left),
+        # leaving 3 Aug genuinely unmatched.
+        aug3 = make_inbound(feed_item_uid="aug3", transaction_time="2026-08-03T23:01:00Z")
+        aug9 = make_inbound(feed_item_uid="aug9", transaction_time="2026-08-09T23:01:00Z")
+        aug11 = make_inbound(feed_item_uid="aug11", transaction_time="2026-08-11T23:01:00Z")
+        aug10_payment = make_outbound(feed_item_uid="aug10-payment", transaction_time="2026-08-10T06:07:45Z")
+        aug23_payment = make_outbound(feed_item_uid="aug23-payment", transaction_time="2026-08-23T14:33:10Z")
+
+        result = match_payments([aug3, aug9, aug11], [aug10_payment, aug23_payment], window_days=14)
+
+        matches = {p.inbound.feed_item_uid: p.outbound.feed_item_uid for p in result.matched}
+        self.assertEqual(matches, {"aug9": "aug10-payment", "aug11": "aug23-payment"})
+        self.assertEqual([i.feed_item_uid for i in result.unmatched_inbound], ["aug3"])
 
     def test_excluded_outbound_uids_are_never_matched(self):
         inbound = make_inbound()

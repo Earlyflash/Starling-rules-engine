@@ -79,19 +79,31 @@ real transfers" section below for why and how.
 
 **Payment requests must be signed.** Beyond the personal access token,
 Starling requires every payment-creation request to carry a detached
-signature from an RSA key you register in the Developer Portal:
+signature from an RSA key you register in the Developer Portal. The
+portal asks for **two** key pairs at registration, not one - a **Main**
+key (the one that actually signs payment requests) and a **Rotation**
+key (kept aside untouched, only ever used later if you need to replace
+the Main key):
 
-1. Generate a key pair:
+1. Generate both key pairs:
    ```
    openssl genrsa -out starling-signing-private.pem 2048
    openssl rsa -in starling-signing-private.pem -pubout -out starling-signing-public.pem
+
+   openssl genrsa -out starling-rotation-private.pem 2048
+   openssl rsa -in starling-rotation-private.pem -pubout -out starling-rotation-public.pem
    ```
-2. Upload `starling-signing-public.pem` in the Developer Portal against
-   your personal access token; it gives you back a key uid.
-3. Set `signing_key_uid` (the uid from step 2) and
-   `signing_private_key_path` (pointing at the *private* key from step 1)
-   in `config.yaml`. Keep the private key file outside this repo, or at
-   least somewhere gitignored (`*.pem`/`*.key` already are) - it's as
+2. Upload both public keys (`starling-signing-public.pem` as the Main
+   key, `starling-rotation-public.pem` as the Rotation key) in the
+   Developer Portal against your personal access token; it gives you back
+   a key uid for the Main key.
+3. Set `signing_key_uid` (the Main key's uid from step 2) and
+   `signing_private_key_path` (pointing at `starling-signing-private.pem`
+   from step 1) in `config.yaml`. This tool never needs the Rotation key -
+   it exists purely as a recovery mechanism for the day you rotate the
+   Main key (a separate, manual process, not something this tool
+   automates). Keep both private key files outside this repo, or at least
+   somewhere gitignored (`*.pem`/`*.key` already are) - they're as
    sensitive as the access token.
 
 `dry_run: true` never needs any of this - it never calls the payment

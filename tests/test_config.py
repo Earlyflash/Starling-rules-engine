@@ -49,7 +49,14 @@ class TestLoadConfig(unittest.TestCase):
         self.assertIsNone(config.alert_webhook_url)
         self.assertIsNone(config.signing_key_uid)
         self.assertIsNone(config.signing_private_key_path)
+        self.assertIsNone(config.credit_card_payment_reference)
         self.assertEqual(config.reconciliation_match_window_days, 14)  # defaults to safe/sane
+
+    @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok"}, clear=True)
+    def test_reads_credit_card_payment_reference(self):
+        self._write(VALID_YAML + '\ncredit_card_payment_reference: "1234567890123456"\n')
+        config = load_config(self.config_path)
+        self.assertEqual(config.credit_card_payment_reference, "1234567890123456")
 
     @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok"}, clear=True)
     def test_missing_employer_names_raises(self):
@@ -100,6 +107,12 @@ signing_private_key_path: "/path/to/key.pem"
         config = load_config(self.config_path)
         self.assertEqual(config.signing_key_uid, "11111111-1111-1111-1111-111111111111")
         self.assertEqual(config.signing_private_key_path, Path("/path/to/key.pem"))
+
+    @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok", "HOME": "/home/testuser"}, clear=True)
+    def test_expands_tilde_in_signing_private_key_path(self):
+        self._write(VALID_YAML + '\nsigning_private_key_path: "~/keys/starling-signing-private.pem"\n')
+        config = load_config(self.config_path)
+        self.assertEqual(config.signing_private_key_path, Path("/home/testuser/keys/starling-signing-private.pem"))
 
     @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok"}, clear=True)
     def test_reads_custom_reconciliation_window(self):

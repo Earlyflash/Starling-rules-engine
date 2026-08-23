@@ -27,6 +27,7 @@ class ConfigError(RuntimeError):
 class Config:
     employer_names: list[str]
     credit_card_payee_name: str
+    credit_card_payment_reference: Optional[str]
     account_uid: Optional[str]
     currency: str
     safety: SafetyLimits
@@ -82,6 +83,7 @@ def load_config(config_path: Path) -> Config:
     return Config(
         employer_names=employer_names,
         credit_card_payee_name=require("credit_card_payee_name"),
+        credit_card_payment_reference=raw.get("credit_card_payment_reference") or None,
         account_uid=raw.get("account_uid"),
         currency=raw.get("currency", "GBP"),
         safety=safety,
@@ -93,7 +95,7 @@ def load_config(config_path: Path) -> Config:
         alert_webhook_url=os.environ.get("STARLING_RULES_ALERT_WEBHOOK_URL") or None,
         signing_key_uid=raw.get("signing_key_uid") or None,
         signing_private_key_path=(
-            Path(raw["signing_private_key_path"]) if raw.get("signing_private_key_path") else None
+            Path(raw["signing_private_key_path"]).expanduser() if raw.get("signing_private_key_path") else None
         ),
         reconciliation_match_window_days=reconciliation_match_window_days,
     )

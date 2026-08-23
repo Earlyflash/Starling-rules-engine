@@ -15,6 +15,7 @@ def make_config(tmpdir, **overrides):
     defaults = dict(
         employer_names=["ACME CORP LTD"],
         credit_card_payee_name="My Credit Card",
+        credit_card_payment_reference="1234567890123456",
         account_uid=None,
         currency="GBP",
         safety=SafetyLimits(max_transfer_minor_units=100000, max_daily_total_minor_units=200000),
@@ -74,6 +75,9 @@ class TestRunOnce(unittest.TestCase):
         self.assertEqual(kwargs["amount_minor_units"], 5000)
         self.assertEqual(kwargs["payee_account_uid"], "payee-acc-1")
         self.assertEqual(kwargs["external_identifier"], "feed-1")
+        # Must be the fixed, card-issuer-required reference from config -
+        # not something derived per-payment (e.g. from the feed item uid).
+        self.assertEqual(kwargs["reference"], "1234567890123456")
         self.assertTrue(self.state.is_processed("feed-1"))
 
     def test_ignores_non_matching_counterparty(self):

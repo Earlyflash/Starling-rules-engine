@@ -15,6 +15,15 @@ employer_names:
 # The engine only pays existing payees - it cannot create one via the API.
 credit_card_payee_name: "My Credit Card"
 
+# Required to make real payments (i.e. once dry_run is false) - not needed
+# while dry_run stays true. The exact, fixed reference your card issuer
+# needs on a bank transfer to apply it to *your* card (e.g. your card
+# number) - this is NOT something the engine can infer from the payee
+# alone. Get this from a payment you (or someone) already made to this
+# card successfully - don't guess. Every auto-payment uses this reference
+# unchanged.
+# credit_card_payment_reference: "0000000000000000"
+
 # Leave commented out if your personal access token only has access to a
 # single account. Set explicitly if it can see more than one - the engine
 # refuses to guess which account to watch/pay from.

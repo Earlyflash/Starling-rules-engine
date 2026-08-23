@@ -60,6 +60,13 @@ def main(argv=None) -> int:
                 file=sys.stderr,
             )
             return 2
+        if not config.credit_card_payment_reference:
+            print(
+                "config error: dry_run is false, but credit_card_payment_reference is not set - "
+                "required so payments actually get applied to your card (see config.example.yaml)",
+                file=sys.stderr,
+            )
+            return 2
         try:
             signing_key = load_signing_key(config.signing_key_uid, config.signing_private_key_path)
         except SigningError as exc:

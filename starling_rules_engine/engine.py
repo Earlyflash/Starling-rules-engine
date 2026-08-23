@@ -13,7 +13,7 @@ from datetime import datetime, timedelta, timezone
 from .config import Config
 from .matcher import is_employer_payment
 from .notifier import Notifier
-from .reconciler import AUTO_PAYMENT_REFERENCE_PREFIX, is_manual_card_payment, match_payments, parse_transaction_time
+from .reconciler import is_manual_card_payment, match_payments, parse_transaction_time
 from .safety import SafetyRejection
 from .safety import check as check_safety
 from .starling_client import StarlingClient
@@ -96,9 +96,10 @@ def run_once(config: Config, client: StarlingClient, state: State, notifier: Not
 
 def _find_already_paid(config, client, state, account, payee, new_matches) -> dict:
     """Check `new_matches` against recent settled card payments the user made
-    by hand (not ones this tool made itself - see AUTO_PAYMENT_REFERENCE_PREFIX),
-    so a reimbursement someone already paid off manually doesn't also get
-    auto-paid. Returns {inbound_feed_item_uid: MatchedPair}.
+    by hand - intended to exclude ones this tool made itself, though see
+    reconciler.py's "KNOWN GAP" docstring for why that exclusion currently
+    doesn't reliably work - so a reimbursement someone already paid off
+    manually doesn't also get auto-paid. Returns {inbound_feed_item_uid: MatchedPair}.
     """
     window_days = config.reconciliation_match_window_days
     if not new_matches or window_days <= 0:
@@ -185,7 +186,11 @@ def _handle_match(config, client, state, notifier, account, payee, item, today) 
         )
         return
 
-    reference = f"{AUTO_PAYMENT_REFERENCE_PREFIX}{item.feed_item_uid[:8]}"
+    # Use the fixed reference the card issuer needs to apply the payment to
+    # the right account (e.g. a card number) - NOT a per-payment generated
+    # value. See reconciler.py's AUTO_PAYMENT_REFERENCE_PREFIX docstring:
+    # this means "is this outbound payment one I made myself" can no longer
+    # be told apart from a manual payment by reference alone.
     try:
         client.make_local_payment(
             account_uid=account.account_uid,
@@ -193,7 +198,7 @@ def _handle_match(config, client, state, notifier, account, payee, item, today) 
             payee_account_uid=payee.payee_account_uid,
             amount_minor_units=item.amount_minor_units,
             currency=item.currency or config.currency,
-            reference=reference,
+            reference=config.credit_card_payment_reference,
             external_identifier=item.feed_item_uid,
         )
     except Exception as exc:  # noqa: BLE001 - surfaced via notifier, never swallowed
