@@ -177,6 +177,11 @@ Example crontab entry, polling every 30 minutes:
 */30 * * * * cd /path/to/starling-rules-engine && /path/to/venv/bin/python -m starling_rules_engine >> cron.log 2>&1
 ```
 
+See [`docs/cron-setup.md`](docs/cron-setup.md) for the full setup guide -
+why each part of that line matters, log rotation, testing it before you
+trust it, what to expect once real payments are involved, troubleshooting,
+and a systemd timer alternative.
+
 ## Running tests
 
 ```
