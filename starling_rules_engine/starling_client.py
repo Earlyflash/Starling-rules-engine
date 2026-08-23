@@ -59,6 +59,14 @@ class Payee:
 
 
 @dataclass
+class PaymentStatus:
+    payment_uid: str
+    completed_at: Optional[str]  # set once the payment has actually settled
+    rejected_at: Optional[str]  # set if Starling rejected it
+    payment_status: Optional[str]  # ACCEPTED / REJECTED / PENDING - see get_payment_order_payments docstring
+
+
+@dataclass
 class FeedItem:
     feed_item_uid: str
     amount_minor_units: int
@@ -170,6 +178,37 @@ class StarlingClient:
                 )
             )
         return items
+
+    def get_payment_order_payments(self, payment_order_uid: str) -> list[PaymentStatus]:
+        """Check what actually happened to the payment(s) under a payment order.
+
+        Starling can return 200 from `make_local_payment` with a
+        `paymentOrderUid` before the payment has actually settled - it may
+        sit PENDING (e.g. awaiting the account holder's approval in the
+        Starling app, or a Faster Payments qualified-accept delay of up to
+        a few hours) before either completing or being rejected. Call this
+        afterward and check `completed_at` before treating a payment as
+        having actually happened - never assume success just because the
+        creation call returned 200.
+
+        A one-off local payment order should have exactly one payment
+        under it; this returns a list for forward-compatibility with
+        payment orders that could have more (e.g. standing orders), but
+        callers of make_local_payment should expect at most one entry.
+        """
+        data = self._request("GET", f"/payments/local/payment-order/{payment_order_uid}/payments")
+        statuses = []
+        for p in (data or {}).get("payments", []):
+            details = p.get("paymentStatusDetails") or {}
+            statuses.append(
+                PaymentStatus(
+                    payment_uid=p["paymentUid"],
+                    completed_at=p.get("completedAt"),
+                    rejected_at=p.get("rejectedAt"),
+                    payment_status=details.get("paymentStatus"),
+                )
+            )
+        return statuses
 
     def make_local_payment(
         self,

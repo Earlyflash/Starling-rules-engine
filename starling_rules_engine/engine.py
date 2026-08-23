@@ -66,6 +66,8 @@ def run_once(config: Config, client: StarlingClient, state: State, notifier: Not
     account = resolve_account(config, client)
     payee = resolve_credit_card_payee(config, client)
 
+    _recheck_pending_payments(client, state, notifier)
+
     now = datetime.now(timezone.utc)
     min_ts = state.last_poll_at or (now - timedelta(minutes=config.poll_lookback_minutes)).isoformat()
     max_ts = now.isoformat()
@@ -92,6 +94,80 @@ def run_once(config: Config, client: StarlingClient, state: State, notifier: Not
 
     state.set_last_poll_at(max_ts)
     state.save()
+
+
+def _check_settlement(client: StarlingClient, payment_order_uid: str) -> str:
+    """Returns 'completed', 'rejected', or 'pending' for a payment order
+    just created (or previously pending). Never assume a payment happened
+    just because make_local_payment returned 200 - see get_payment_order_payments's
+    docstring. If the status can't be determined (e.g. a transient API
+    error on the follow-up check), returns 'pending' rather than risk a
+    false 'completed'.
+    """
+    try:
+        statuses = client.get_payment_order_payments(payment_order_uid)
+    except Exception:
+        log.exception("could not check settlement status for payment order %s", payment_order_uid)
+        return "pending"
+
+    if not statuses:
+        return "pending"
+    payment = statuses[0]  # a one-off local payment order has exactly one payment under it
+    if payment.rejected_at or payment.payment_status == "REJECTED":
+        return "rejected"
+    if payment.completed_at:
+        return "completed"
+    return "pending"
+
+
+def _recheck_pending_payments(client: StarlingClient, state: State, notifier: Notifier) -> None:
+    """Follow up on payments from a previous run that were still pending
+    (e.g. awaiting the account holder's approval) when we last checked -
+    without this, a payment stuck pending forever would sit unresolved in
+    state.json indefinitely with no record ever confirming or denying it.
+    """
+    for feed_item_uid, record in state.pending_review_records():
+        payment_order_uid = record["detail"]
+        if not payment_order_uid:
+            continue
+        status = _check_settlement(client, payment_order_uid)
+        if status == "pending":
+            continue  # still waiting - leave it, check again next run
+
+        amount_minor_units = record["amount_minor_units"]
+        if status == "completed":
+            notifier.notify(
+                "transferred",
+                feed_item_uid=feed_item_uid,
+                amount_minor_units=amount_minor_units,
+                payment_order_uid=payment_order_uid,
+                detail="resolved from pending_review",
+            )
+            state.record(
+                ProcessedRecord(
+                    feed_item_uid=feed_item_uid,
+                    processed_at=_now_iso(),
+                    outcome="transferred",
+                    amount_minor_units=amount_minor_units,
+                )
+            )
+        else:  # rejected
+            notifier.notify(
+                "payment_rejected",
+                feed_item_uid=feed_item_uid,
+                amount_minor_units=amount_minor_units,
+                payment_order_uid=payment_order_uid,
+                detail="resolved from pending_review",
+            )
+            state.record(
+                ProcessedRecord(
+                    feed_item_uid=feed_item_uid,
+                    processed_at=_now_iso(),
+                    outcome="rejected",
+                    amount_minor_units=amount_minor_units,
+                    detail=f"payment order {payment_order_uid} rejected",
+                )
+            )
 
 
 def _find_already_paid(config, client, state, account, payee, new_matches) -> dict:
@@ -192,7 +268,7 @@ def _handle_match(config, client, state, notifier, account, payee, item, today) 
     # this means "is this outbound payment one I made myself" can no longer
     # be told apart from a manual payment by reference alone.
     try:
-        client.make_local_payment(
+        response = client.make_local_payment(
             account_uid=account.account_uid,
             category_uid=account.default_category,
             payee_account_uid=payee.payee_account_uid,
@@ -216,6 +292,53 @@ def _handle_match(config, client, state, notifier, account, payee, item, today) 
                 outcome="error",
                 amount_minor_units=item.amount_minor_units,
                 detail=str(exc),
+            )
+        )
+        return
+
+    # A 200 here only means Starling accepted the request, not that money
+    # has moved - it can sit PENDING (e.g. awaiting approval in the app, or
+    # a Faster Payments qualified-accept delay) for a while first. Check
+    # before ever recording this as "transferred" - see _check_settlement.
+    payment_order_uid = (response or {}).get("paymentOrderUid")
+    status = _check_settlement(client, payment_order_uid) if payment_order_uid else "pending"
+
+    if status == "pending":
+        notifier.notify(
+            "payment_pending_review",
+            feed_item_uid=item.feed_item_uid,
+            amount_minor_units=item.amount_minor_units,
+            counterparty=item.counter_party_name,
+            payment_order_uid=payment_order_uid,
+            detail="Starling accepted the payment request but it has not settled yet - "
+            "check the Starling app for an approval prompt; this will be re-checked next run",
+        )
+        state.record(
+            ProcessedRecord(
+                feed_item_uid=item.feed_item_uid,
+                processed_at=_now_iso(),
+                outcome="pending_review",
+                amount_minor_units=item.amount_minor_units,
+                detail=payment_order_uid or "",
+            )
+        )
+        return
+
+    if status == "rejected":
+        notifier.notify(
+            "payment_rejected",
+            feed_item_uid=item.feed_item_uid,
+            amount_minor_units=item.amount_minor_units,
+            counterparty=item.counter_party_name,
+            payment_order_uid=payment_order_uid,
+        )
+        state.record(
+            ProcessedRecord(
+                feed_item_uid=item.feed_item_uid,
+                processed_at=_now_iso(),
+                outcome="rejected",
+                amount_minor_units=item.amount_minor_units,
+                detail=f"payment order {payment_order_uid} rejected",
             )
         )
         return

@@ -109,5 +109,66 @@ class TestReadEndpoints(unittest.TestCase):
         self.assertNotIn("Digest", headers)
 
 
+class TestGetPaymentOrderPayments(unittest.TestCase):
+    def test_parses_completed_payment(self):
+        session = MagicMock()
+        session.request.return_value = _mock_response(
+            200,
+            {
+                "payments": [
+                    {
+                        "paymentUid": "pay-1",
+                        "amount": {"currency": "GBP", "minorUnits": 500},
+                        "reference": "ref",
+                        "payeeUid": "payee-1",
+                        "payeeAccountUid": "payee-acc-1",
+                        "createdAt": "2026-08-23T10:00:00.000Z",
+                        "completedAt": "2026-08-23T10:00:05.000Z",
+                        "paymentStatusDetails": {"paymentStatus": "ACCEPTED", "description": "ACCEPTED"},
+                    }
+                ]
+            },
+        )
+        client = StarlingClient("token", session=session)
+        statuses = client.get_payment_order_payments("order-1")
+
+        self.assertEqual(len(statuses), 1)
+        self.assertEqual(statuses[0].payment_uid, "pay-1")
+        self.assertEqual(statuses[0].completed_at, "2026-08-23T10:00:05.000Z")
+        self.assertIsNone(statuses[0].rejected_at)
+        self.assertEqual(statuses[0].payment_status, "ACCEPTED")
+
+    def test_parses_pending_payment_with_no_completed_or_rejected_at(self):
+        session = MagicMock()
+        session.request.return_value = _mock_response(
+            200,
+            {
+                "payments": [
+                    {
+                        "paymentUid": "pay-1",
+                        "amount": {"currency": "GBP", "minorUnits": 500},
+                        "reference": "ref",
+                        "payeeUid": "payee-1",
+                        "payeeAccountUid": "payee-acc-1",
+                        "createdAt": "2026-08-23T10:00:00.000Z",
+                        "paymentStatusDetails": {"paymentStatus": "PENDING", "description": "PENDING"},
+                    }
+                ]
+            },
+        )
+        client = StarlingClient("token", session=session)
+        statuses = client.get_payment_order_payments("order-1")
+
+        self.assertIsNone(statuses[0].completed_at)
+        self.assertIsNone(statuses[0].rejected_at)
+        self.assertEqual(statuses[0].payment_status, "PENDING")
+
+    def test_empty_payments_list(self):
+        session = MagicMock()
+        session.request.return_value = _mock_response(200, {"payments": []})
+        client = StarlingClient("token", session=session)
+        self.assertEqual(client.get_payment_order_payments("order-1"), [])
+
+
 if __name__ == "__main__":
     unittest.main()

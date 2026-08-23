@@ -51,6 +51,14 @@ class TestState(unittest.TestCase):
         reloaded = State(self.path)
         self.assertEqual(reloaded.claimed_outbound_uids(), frozenset({"out-1"}))
 
+    def test_pending_review_records_returns_only_that_outcome(self):
+        state = State(self.path)
+        state.record(ProcessedRecord("a", "2026-08-22T09:00:00+00:00", "pending_review", 5000, "order-1"))
+        state.record(ProcessedRecord("b", "2026-08-22T10:00:00+00:00", "transferred", 2000))
+        pending = state.pending_review_records()
+        self.assertEqual([uid for uid, _ in pending], ["a"])
+        self.assertEqual(pending[0][1]["detail"], "order-1")
+
     def test_loads_pre_existing_state_file_missing_claimed_outbound_key(self):
         # Simulates a state.json written before claimed_outbound existed.
         self.path.write_text('{"last_poll_at": "2026-08-22T10:00:00+00:00", "processed": {}}', encoding="utf-8")

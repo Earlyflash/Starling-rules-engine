@@ -21,9 +21,10 @@ from typing import Optional
 class ProcessedRecord:
     feed_item_uid: str
     processed_at: str  # ISO 8601, UTC
-    outcome: str  # "transferred" | "skipped_cap" | "skipped_dry_run" | "error"
+    outcome: str  # "transferred" | "skipped_cap" | "skipped_dry_run" | "skipped_already_paid"
+    # | "pending_review" | "rejected" | "error"
     amount_minor_units: int
-    detail: str = ""
+    detail: str = ""  # for "pending_review": the paymentOrderUid to re-check next run
 
 
 class State:
@@ -72,6 +73,17 @@ class State:
             "amount_minor_units": record.amount_minor_units,
             "detail": record.detail,
         }
+
+    def pending_review_records(self) -> list[tuple[str, dict]]:
+        """(feed_item_uid, record) pairs for payments that were submitted
+        but hadn't settled or been rejected as of the last check - see
+        engine.py's _recheck_pending_payments, which re-checks and
+        resolves these on each run rather than leaving them stuck forever."""
+        return [
+            (feed_item_uid, rec)
+            for feed_item_uid, rec in self._data["processed"].items()
+            if rec["outcome"] == "pending_review"
+        ]
 
     def transferred_total_today_minor_units(self, today: str) -> int:
         """Sum of amounts already transferred (outcome == 'transferred')

@@ -7,8 +7,23 @@ from starling_rules_engine.config import Config
 from starling_rules_engine.engine import run_once
 from starling_rules_engine.notifier import Notifier
 from starling_rules_engine.safety import SafetyLimits
-from starling_rules_engine.starling_client import Account, FeedItem, Payee
+from starling_rules_engine.starling_client import Account, FeedItem, Payee, PaymentStatus
 from starling_rules_engine.state import ProcessedRecord, State
+
+
+def _mock_completed_payment(client, payment_order_uid="order-1"):
+    """Configures a MagicMock client so a real payment attempt looks like
+    it settled immediately - the default most tests want; settlement-check
+    behavior itself is covered separately in TestSettlementCheck."""
+    client.make_local_payment.return_value = {"paymentOrderUid": payment_order_uid}
+    client.get_payment_order_payments.return_value = [
+        PaymentStatus(
+            payment_uid="pay-1",
+            completed_at="2026-08-22T09:05:00Z",
+            rejected_at=None,
+            payment_status="ACCEPTED",
+        )
+    ]
 
 
 def make_config(tmpdir, **overrides):
@@ -59,6 +74,7 @@ class TestRunOnce(unittest.TestCase):
         self.client.list_payees.return_value = [
             Payee(payee_uid="payee-1", name="My Credit Card", payee_account_uid="payee-acc-1")
         ]
+        _mock_completed_payment(self.client)
         self.state = State(self.config.state_path)
         self.notifier = Notifier()
 
@@ -154,6 +170,7 @@ class TestAlreadyPaidGuard(unittest.TestCase):
         self.client.list_payees.return_value = [
             Payee(payee_uid="payee-1", name="My Credit Card", payee_account_uid="payee-acc-1")
         ]
+        _mock_completed_payment(self.client)
         self.state = State(self.config.state_path)
         self.notifier = Notifier()
 
@@ -209,6 +226,94 @@ class TestAlreadyPaidGuard(unittest.TestCase):
 
         self.client.make_local_payment.assert_called_once()
         self.client.list_feed_items_between.assert_called_once()  # no second (outbound) fetch
+
+
+class TestSettlementCheck(unittest.TestCase):
+    """Covers engine._check_settlement / _recheck_pending_payments - a 200
+    from make_local_payment must never be trusted alone; the engine has to
+    confirm the payment actually completed before recording 'transferred'."""
+
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.config = make_config(self._tmpdir.name)
+        self.client = MagicMock()
+        self.client.list_accounts.return_value = [
+            Account(account_uid="acc-1", default_category="cat-1", currency="GBP", name="Personal")
+        ]
+        self.client.list_payees.return_value = [
+            Payee(payee_uid="payee-1", name="My Credit Card", payee_account_uid="payee-acc-1")
+        ]
+        self.state = State(self.config.state_path)
+        self.notifier = Notifier()
+
+    def tearDown(self):
+        self._tmpdir.cleanup()
+
+    def test_pending_payment_is_not_recorded_as_transferred(self):
+        self.client.list_feed_items_between.return_value = [make_item()]
+        self.client.make_local_payment.return_value = {"paymentOrderUid": "order-1"}
+        self.client.get_payment_order_payments.return_value = [
+            PaymentStatus(payment_uid="pay-1", completed_at=None, rejected_at=None, payment_status="PENDING")
+        ]
+
+        run_once(self.config, self.client, self.state, self.notifier)
+
+        record = self.state._data["processed"]["feed-1"]
+        self.assertEqual(record["outcome"], "pending_review")
+        self.assertEqual(record["detail"], "order-1")
+        self.assertEqual(self.state.transferred_total_today_minor_units("2026-08-22"), 0)
+
+    def test_rejected_payment_is_recorded_as_rejected_not_transferred(self):
+        self.client.list_feed_items_between.return_value = [make_item()]
+        self.client.make_local_payment.return_value = {"paymentOrderUid": "order-1"}
+        self.client.get_payment_order_payments.return_value = [
+            PaymentStatus(
+                payment_uid="pay-1", completed_at=None, rejected_at="2026-08-22T09:05:00Z", payment_status="REJECTED"
+            )
+        ]
+
+        run_once(self.config, self.client, self.state, self.notifier)
+
+        record = self.state._data["processed"]["feed-1"]
+        self.assertEqual(record["outcome"], "rejected")
+
+    def test_no_payment_order_uid_treated_as_pending(self):
+        self.client.list_feed_items_between.return_value = [make_item()]
+        self.client.make_local_payment.return_value = {}  # malformed/missing response
+
+        run_once(self.config, self.client, self.state, self.notifier)
+
+        record = self.state._data["processed"]["feed-1"]
+        self.assertEqual(record["outcome"], "pending_review")
+        self.client.get_payment_order_payments.assert_not_called()
+
+    def test_pending_review_is_rechecked_not_resubmitted(self):
+        self.state.record(ProcessedRecord("feed-1", "2026-08-22T08:00:00+00:00", "pending_review", 5000, "order-1"))
+        self.client.list_feed_items_between.return_value = []  # nothing new this poll
+        self.client.get_payment_order_payments.return_value = [
+            PaymentStatus(
+                payment_uid="pay-1", completed_at="2026-08-22T09:10:00Z", rejected_at=None, payment_status="ACCEPTED"
+            )
+        ]
+
+        run_once(self.config, self.client, self.state, self.notifier)
+
+        self.client.make_local_payment.assert_not_called()  # never resubmitted
+        self.client.get_payment_order_payments.assert_called_once_with("order-1")
+        record = self.state._data["processed"]["feed-1"]
+        self.assertEqual(record["outcome"], "transferred")
+
+    def test_still_pending_on_recheck_stays_pending(self):
+        self.state.record(ProcessedRecord("feed-1", "2026-08-22T08:00:00+00:00", "pending_review", 5000, "order-1"))
+        self.client.list_feed_items_between.return_value = []
+        self.client.get_payment_order_payments.return_value = [
+            PaymentStatus(payment_uid="pay-1", completed_at=None, rejected_at=None, payment_status="PENDING")
+        ]
+
+        run_once(self.config, self.client, self.state, self.notifier)
+
+        record = self.state._data["processed"]["feed-1"]
+        self.assertEqual(record["outcome"], "pending_review")
 
 
 if __name__ == "__main__":

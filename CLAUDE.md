@@ -77,8 +77,9 @@ these modules in order:
    `safety.py`'s daily cap look at same-day transfers across runs. Writes
    are atomic (write to a tempfile in the same dir, then `os.replace`).
 8. **`notifier.py`** - every outcome (`transferred`, `skipped_safety_cap`,
-   `skipped_already_paid`, `dry_run_would_transfer`, `transfer_failed`,
-   `run_failed`) is logged and, if `STARLING_RULES_ALERT_WEBHOOK_URL` is
+   `skipped_already_paid`, `dry_run_would_transfer`, `payment_pending_review`,
+   `payment_rejected`, `transfer_failed`, `run_failed`) is logged and, if
+   `STARLING_RULES_ALERT_WEBHOOK_URL` is
    set, posted to that webhook. Nothing the engine does happens silently.
 9. **`engine.py`** - `run_once()` ties the above together: resolve
    account/payee -> fetch feed items since last poll -> for each new,

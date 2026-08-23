@@ -25,13 +25,20 @@ transfers" below before setting `dry_run: false`.**
    partially transferred.
 5. If it passes the caps and `dry_run: false`, it makes a one-off payment
    of the same amount to your configured `credit_card_payee_name` (which
-   must already exist as a saved payee in your Starling account).
+   must already exist as a saved payee in your Starling account) - then
+   checks whether it actually settled before recording success. Starling
+   can accept a payment request without it moving money immediately (e.g.
+   awaiting your approval in the Starling app) - if so, it's marked
+   `pending_review` and re-checked on every later run until it resolves,
+   rather than being wrongly recorded as transferred.
 6. Every outcome - transferred, skipped (already paid), skipped (cap),
-   skipped (dry run), or error - is logged and, if
-   `STARLING_RULES_ALERT_WEBHOOK_URL` is set, posted to that webhook (e.g.
-   a Slack incoming webhook).
-7. Each feed item is only ever processed once, tracked in `state.json` -
-   safe to re-run without double-paying.
+   skipped (dry run), pending review, rejected, or error - is logged and,
+   if `STARLING_RULES_ALERT_WEBHOOK_URL` is set, posted to that webhook
+   (e.g. a Slack incoming webhook).
+7. Each feed item is only ever processed once it reaches a final outcome,
+   tracked in `state.json` - safe to re-run without double-paying. A
+   `pending_review` item isn't final yet and gets re-checked (not
+   re-paid) on the next run instead.
 
 It's a one-shot script, not a daemon: it's meant to be run on a schedule
 (cron / systemd timer), see "Running on a schedule" below.
@@ -219,4 +226,14 @@ the real API.
   failed transfer is logged/alerted and picked up as a fresh match on the
   next scheduled run only if the feed item wasn't marked processed (it
   currently *is* marked as `error` and won't be retried automatically -
-  re-run manually, or delete its entry from `state.json`, to retry).
+  re-run manually, or delete its entry from `state.json`, to retry). A
+  `rejected` payment (Starling declined it) behaves the same way - not
+  retried automatically. A `pending_review` payment is different: it's
+  re-checked (not re-submitted) on every subsequent run until it resolves
+  to `transferred` or `rejected` on its own, so it needs no manual action
+  unless it never resolves.
+- Whether/how often a real payment needs manual approval in the Starling
+  app is entirely Starling's own fraud/security decision, not something
+  this tool controls or can query in advance - if it happens on an
+  unattended run and nobody approves it, the payment simply stays
+  `pending_review` (see above) rather than silently failing or duplicating.
