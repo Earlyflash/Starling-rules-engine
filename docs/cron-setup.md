@@ -200,12 +200,30 @@ logged in and you'd rather not rely on lingering.)
 # ~/.config/systemd/user/starling-rules-engine.service
 [Unit]
 Description=Starling rules engine poll
+StartLimitIntervalSec=1800
+StartLimitBurst=5
 
 [Service]
 Type=oneshot
 WorkingDirectory=/path/to/starling-rules-engine
 ExecStart=/path/to/starling-rules-engine/.venv/bin/python -m starling_rules_engine
+Restart=on-failure
+RestartSec=300
 ```
+
+`Restart=on-failure` + `RestartSec=300` covers the most common wake-from-sleep
+failure: `Persistent=true` fires the missed run the moment systemd notices
+it's overdue, which on a laptop is often before Wi-Fi has reassociated -
+`starling_client.py`'s request then fails with a connection error, the run
+exits non-zero, and without this it would just wait for tomorrow's slot.
+This retries up to `StartLimitBurst` times, 5 minutes apart, before giving
+up and leaving the unit in a failed state (`systemctl --user status` /
+`journalctl` will show it). Nothing is at risk either way - `last_poll_at`
+in `state.json` only advances after a run fully succeeds (see `engine.py`),
+so a failed attempt just delays, never double-processes. `StartLimitIntervalSec=1800`
+widens systemd's default 10-second retry-counting window so all 5 attempts
+(20 minutes span) actually get to run rather than tripping the default burst
+limit early and failing permanently.
 
 ```ini
 # ~/.config/systemd/user/starling-rules-engine.timer
