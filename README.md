@@ -11,7 +11,10 @@ transfers" below before setting `dry_run: false`.**
 ## How it works
 
 1. On each run, it fetches Starling feed items on your account since the
-   last run (or the last `poll_lookback_minutes` on the very first run).
+   last run, minus a `poll_overlap_minutes` safety overlap (default 3 days)
+   so late-appearing or late-settling payments aren't missed - or the last
+   `poll_lookback_minutes` on the very first run. Items already handled on
+   an earlier run are never processed twice.
 2. Any settled, inbound item whose counterparty name matches one of your
    configured `employer_names` is treated as a match.
 3. Before doing anything else with a match, it checks whether you've

@@ -34,6 +34,7 @@ class Config:
     dry_run: bool
     sandbox: bool
     poll_lookback_minutes: int
+    poll_overlap_minutes: int
     state_path: Path
     starling_token: str
     alert_webhook_url: Optional[str]
@@ -80,6 +81,13 @@ def load_config(config_path: Path) -> Config:
     if reconciliation_match_window_days < 0:
         raise ConfigError("reconciliation.match_window_days must be >= 0")
 
+    try:
+        poll_overlap_minutes = int(raw.get("poll_overlap_minutes", 4320))
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"invalid poll_overlap_minutes: {exc}") from exc
+    if poll_overlap_minutes < 0:
+        raise ConfigError("poll_overlap_minutes must be >= 0")
+
     return Config(
         employer_names=employer_names,
         credit_card_payee_name=require("credit_card_payee_name"),
@@ -90,6 +98,7 @@ def load_config(config_path: Path) -> Config:
         dry_run=bool(raw.get("dry_run", True)),
         sandbox=bool(raw.get("sandbox", False)),
         poll_lookback_minutes=int(raw.get("poll_lookback_minutes", 1440)),
+        poll_overlap_minutes=poll_overlap_minutes,
         state_path=Path(raw.get("state_path", "state.json")),
         starling_token=token,
         alert_webhook_url=os.environ.get("STARLING_RULES_ALERT_WEBHOOK_URL") or None,

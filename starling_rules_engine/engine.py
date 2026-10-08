@@ -69,7 +69,7 @@ def run_once(config: Config, client: StarlingClient, state: State, notifier: Not
     _recheck_pending_payments(client, state, notifier)
 
     now = datetime.now(timezone.utc)
-    min_ts = state.last_poll_at or (now - timedelta(minutes=config.poll_lookback_minutes)).isoformat()
+    min_ts = _poll_window_start(config, state, now)
     max_ts = now.isoformat()
 
     items = client.list_feed_items_between(account.account_uid, account.default_category, min_ts, max_ts)
@@ -94,6 +94,24 @@ def run_once(config: Config, client: StarlingClient, state: State, notifier: Not
 
     state.set_last_poll_at(max_ts)
     state.save()
+
+
+def _poll_window_start(config: Config, state: State, now: datetime) -> str:
+    """Start of this run's feed fetch window.
+
+    Deliberately reaches back `poll_overlap_minutes` before the previous
+    run rather than starting exactly at it: a feed item's transactionTime
+    can be earlier than when it actually appears in the feed (e.g. BACS
+    credits are stamped 23:01 the day before but land hours later), and
+    an item can still be PENDING at one poll and only SETTLED by a later
+    one. Without the overlap, either case falls before the next window
+    and is never seen again. Re-fetching is safe - state.is_processed
+    stops any feed item being acted on twice.
+    """
+    if not state.last_poll_at:
+        return (now - timedelta(minutes=config.poll_lookback_minutes)).isoformat()
+    last_poll = datetime.fromisoformat(state.last_poll_at)
+    return (last_poll - timedelta(minutes=config.poll_overlap_minutes)).isoformat()
 
 
 def _check_settlement(client: StarlingClient, payment_order_uid: str) -> str:

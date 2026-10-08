@@ -75,8 +75,8 @@ Edit with `crontab -e`. Breaking that down:
 
 30 minutes is a reasonable default: frequent enough that a reimbursement
 gets paid off the same day it lands, infrequent enough not to matter if
-Starling's API has a brief blip (the next run just picks up from
-`last_poll_at`, nothing is lost - see `state.py`). `poll_lookback_minutes` in
+Starling's API has a brief blip (the next run picks up from
+`last_poll_at` minus `poll_overlap_minutes`, nothing is lost - see `state.py`). `poll_lookback_minutes` in
 `config.yaml` only matters for the very first run before `state.json`
 exists; it's irrelevant to how often cron itself fires.
 

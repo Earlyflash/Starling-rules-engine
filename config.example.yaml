@@ -80,4 +80,12 @@ sandbox: false
 # so this only matters once.
 poll_lookback_minutes: 1440
 
+# On every run after the first, how far *before* the previous run's
+# timestamp to start looking. Some payments (e.g. BACS) are timestamped
+# hours before they actually appear in the feed, and an item may still be
+# pending at one run and only settle by a later one - without this overlap
+# those would be missed forever. Re-fetching is safe: a feed item is never
+# processed twice. Default 4320 (3 days); 0 disables.
+poll_overlap_minutes: 4320
+
 state_path: "state.json"

@@ -37,6 +37,7 @@ def make_config(tmpdir, **overrides):
         dry_run=False,
         sandbox=True,
         poll_lookback_minutes=1440,
+        poll_overlap_minutes=4320,
         state_path=Path(tmpdir) / "state.json",
         starling_token="test-token",
         alert_webhook_url=None,
@@ -138,6 +139,27 @@ class TestRunOnce(unittest.TestCase):
 
         with self.assertRaises(RuntimeError):
             run_once(self.config, self.client, self.state, self.notifier)
+
+    def test_window_overlaps_previous_poll(self):
+        # A BACS credit stamped 23:01 the day before can land in the feed
+        # after a later poll - the next window must still reach back to it.
+        self.state.set_last_poll_at("2026-08-22T23:30:00+00:00")
+        self.config.poll_overlap_minutes = 4320
+        self.client.list_feed_items_between.return_value = []
+
+        run_once(self.config, self.client, self.state, self.notifier)
+
+        min_ts = self.client.list_feed_items_between.call_args.args[2]
+        self.assertEqual(min_ts, "2026-08-19T23:30:00+00:00")
+
+    def test_overlap_does_not_reprocess_item_seen_last_run(self):
+        self.state.set_last_poll_at("2026-08-22T10:00:00+00:00")
+        self.state.record(ProcessedRecord("feed-1", "2026-08-22T10:00:00+00:00", "transferred", 5000))
+        self.client.list_feed_items_between.return_value = [make_item()]  # re-fetched via overlap
+
+        run_once(self.config, self.client, self.state, self.notifier)
+
+        self.client.make_local_payment.assert_not_called()
 
 
 def make_outbound(**overrides):

@@ -51,6 +51,7 @@ class TestLoadConfig(unittest.TestCase):
         self.assertIsNone(config.signing_private_key_path)
         self.assertIsNone(config.credit_card_payment_reference)
         self.assertEqual(config.reconciliation_match_window_days, 14)  # defaults to safe/sane
+        self.assertEqual(config.poll_overlap_minutes, 4320)
 
     @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok"}, clear=True)
     def test_reads_credit_card_payment_reference(self):
@@ -123,6 +124,12 @@ signing_private_key_path: "/path/to/key.pem"
     @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok"}, clear=True)
     def test_negative_reconciliation_window_raises(self):
         self._write(VALID_YAML + "\nreconciliation:\n  match_window_days: -1\n")
+        with self.assertRaises(ConfigError):
+            load_config(self.config_path)
+
+    @patch.dict(os.environ, {"STARLING_PERSONAL_ACCESS_TOKEN": "tok"}, clear=True)
+    def test_negative_poll_overlap_raises(self):
+        self._write(VALID_YAML + "\npoll_overlap_minutes: -1\n")
         with self.assertRaises(ConfigError):
             load_config(self.config_path)
 
